@@ -217,6 +217,7 @@ __global__ void qk_sparse_forward(
 }
 
 // Launch for testing.
+/*
 static void qk_sparse_forward_launch(const at::Tensor& Q,
                                      const at::Tensor& K,
                                      const at::Tensor& V,
@@ -279,7 +280,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("qk_sparse_forward", &qk_sparse_forward_py, "QK‑sparse forward (bf16, causal)");
   // TODO: expose backward once written
 }
-    
+*/
 
     
 
