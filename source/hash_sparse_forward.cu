@@ -18,21 +18,26 @@
 #include <cuda_fp16.h>
 #include <cub/cub.cuh>
 #include <cstdint>
-#include <limits>
+#include <cuda_runtime.h>
+#include <math_constants.h>
 
 #define DIVUP(x, y) (((x) + (y) - 1) / (y))
 
-// Warp-level reductions
+// ======== Warp-level reductions ========
+
+// Find the max value across threads in a warp.
 __device__ inline float warp_reduce_max(float v) {
     for (int offset = 16; offset > 0; offset >>= 1)
         v = fmaxf(v, __shfl_down_sync(0xffffffff, v, offset));
     return v;
 }
+// Find min values across threads in a warp.
 __device__ inline float warp_reduce_min(float v) {
     for (int offset = 16; offset > 0; offset >>= 1)
         v = fminf(v, __shfl_down_sync(0xffffffff, v, offset));
     return v;
 }
+// Find sum of values across a warp.
 __device__ inline float warp_reduce_sum(float v) {
     for (int offset = 16; offset > 0; offset >>= 1)
         v += __shfl_down_sync(0xffffffff, v, offset);
@@ -44,15 +49,16 @@ __device__ inline float bf16_to_fp32(__nv_bfloat16 x) { return __bfloat162float(
 
 __device__ inline __nv_bfloat16 fp32_to_bf16(float x) { return __float2bfloat16(x); }
 
-// Kernel-tunable parameters.
+// ======== Kernel-tunable parameters ========
 constexpr int BLOCK_M = 128; // queries per thread-block (rows)
 constexpr int BLOCK_N = 128; // keys per thread-block (cols)
 constexpr int D_HEAD = 64; // per-head embedding size
+constexpr int MAX_UNROLL = 16;
 
 // Shared-memory static buffers, with hash bucket ids now
 struct SharedHashStore { // per-CTA scratchpad
     __nv_bfloat16 K[BLOCK_N][D_HEAD]; // stream keys
-    __nv_bfloat16 V[BLOCK_N][D_HEAD]; // stream vcalues re-use for logits
+    __nv_bfloat16 V[BLOCK_N][D_HEAD]; // stream values re-used for logits
     int32_t    Kidx[BLOCK_N]; // original time indicies
     int32_t      Kh[BLOCK_N]; // hash bucket id    
 };
@@ -106,7 +112,7 @@ __global__ void hash_sparse_forward(
     int32_t qh_local[BLOCK_M];
     float   qvec_local[BLOCK_M]; // single component (== lane) of each query row
 
-    #pragma unroll
+    #pragma unroll MAX_UNROLL 
     for (int mi = 0; mi < BLOCK_M; ++mi) {
         int gq = tile_q0 + mi;
         bool in_range = gq < Nq;
@@ -125,7 +131,7 @@ __global__ void hash_sparse_forward(
     int min_qh = INT_MAX;
     int max_qh = -1;
 
-    #pragma unroll
+    #pragma unroll MAX_UNROLL
     for (int mi = 0; mi < BLOCK_M; ++mi) {
         max_qi = max(max_qi, qi_local[mi]);
         min_qh = min(min_qh, qh_local[mi]);
@@ -139,13 +145,13 @@ __global__ void hash_sparse_forward(
     float m_prev[BLOCK_M];
     float l_prev[BLOCK_M];
 
-    #pragma unroll
+    #pragma unroll MAX_UNROLL
     for (int mi = 0; mi < BLOCK_M; ++mi) { m_prev[mi] = -CUDART_INF_F; l_prev[mi] = 0.0f; }    
     
     float acc[BLOCK_M][D_HEAD];
-    #pragma unroll
+    #pragma unroll MAX_UNROLL
     for (int mi = 0; mi < BLOCK_M; ++mi) {
-        #pragma unroll
+        #pragma unroll MAX_UNROLL
         for (int d = 0; d < D_HEAD; ++d) {
             acc[mi][d] = 0.0f;  
         }
@@ -190,7 +196,7 @@ __global__ void hash_sparse_forward(
         __syncthreads();
 
         // per-query dot, mask, streaming softmax
-        #pragma unroll
+        #pragma unroll MAX_UNROLL
         for (int mi = 0; mi < BLOCK_M; ++mi) {
             int gq = tile_q0 + mi;
             if (gq >= Nq) continue;
@@ -198,17 +204,17 @@ __global__ void hash_sparse_forward(
             // compute qk^T for *this lane* across BLOCK_N keys
 
             float dots[BLOCK_N];
-            #pragma unroll
+            #pragma unroll MAX_UNROLL
             for (int nk = 0; nk < BLOCK_N; ++nk)
                 dots[nk] = qvec_local[mi] * bf16_to_fp32(store.K[nk][lane]);
 
-            #pragma unroll
+            #pragma unroll MAX_UNROLL
             for (int nk = 0; nk < BLOCK_N; ++nk) 
                 dots[nk] = warp_reduce_sum(dots[nk]);
 
             if (lane == 0) {
                 float* logits = reinterpret_cast<float*>(store.V);
-                #pragma unroll
+                #pragma unroll MAX_UNROLL
                 for (int nk = 0; nk < BLOCK_N; ++nk) {
                     int32_t ki = store.Kidx[nk];
                     int32_t kh = store.Kh[nk];
@@ -224,7 +230,7 @@ __global__ void hash_sparse_forward(
         // softmax-update and accumulate
         float* logits = reinterpret_cast<float*>(store.V);
         
-        #pragma unroll
+        #pragma unroll MAX_UNROLL
         for (int mi = 0; mi < BLOCK_M; ++mi) {
             int gq = tile_q0 + mi; if (gq >= Nq) continue;
             if (lane >= BLOCK_N) continue; // spare lanes idle
@@ -246,7 +252,7 @@ __global__ void hash_sparse_forward(
                 m_prev[mi] = fmaxf(m_prev[mi], row_max);
                 l_prev[mi] = l_prev[mi] * __expf(m_prev[mi] - row_max) + row_sum;
 
-                #pragma unroll
+                #pragma unroll MAX_UNROLL
                 for (int d = 0; d < D_HEAD; ++d) acc[mi][d] += contrib;
             }
         }
@@ -260,7 +266,7 @@ __global__ void hash_sparse_forward(
             Lh[gq] = l_prev[mi];
             Mh[gq] = m_prev[mi];
 
-            #pragma unroll
+            #pragma unroll MAX_UNROLL
             for (int d = 0; d < D_HEAD; ++d) {
                 Oh[gq * som + d] = acc[mi][d];
             }
@@ -269,7 +275,6 @@ __global__ void hash_sparse_forward(
 }
 
 // untested.
-/*
 static void hash_sparse_forward_launch(const at::Tensor& Q,
                                        const at::Tensor& K,
                                        const at::Tensor& V,
@@ -318,6 +323,5 @@ at::Tensor hash_sparse_forward_py(at::Tensor Q,at::Tensor K,at::Tensor V,
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m){
-  m.def("hash_sparse_forward", &hash_sparse_forward_py, "Hash‑sparse forward (bf16)");
+  m.def("forward", &hash_sparse_forward_py, "Hash‑sparse forward (bf16)");
 }
-*/

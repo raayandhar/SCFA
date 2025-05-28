@@ -1,10 +1,13 @@
 from torch.utils.cpp_extension import load
+import torch
+import os
+os.environ["TORCH_CUDA_ARCH_LIST"] = "8.6"
 mod = load(
     name="qk_sparse_forward",
-    sources=["qk_sparse_forward.cu"],
+    sources=["../source/qk_sparse_forward.cu"],
     extra_cuda_cflags=[
-        "-O3","--use_fast_math",
-        "-gencode=arch=compute_89,code=sm_89"
+        "-O2","--use_fast_math",
+        "-gencode=arch=compute_86,code=sm_86"
     ])
 print("compiled OK:", mod)
 
