@@ -255,7 +255,7 @@ class _attention_qk(torch.autograd.Function):
         capability = torch.cuda.get_device_capability()
         if capability[0] < 8:
             raise RuntimeError("Flash attention currently only supported for compute capability >= 80")
-        BLOCK = 128
+        BLOCK = 64
         # shape constraints
         Lq, Lk, Lv = q.shape[-1], k.shape[-1], v.shape[-1]
         assert Lq == Lk and Lk == Lv
@@ -291,7 +291,7 @@ class _attention_qk(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, do):
-        BLOCK = 128
+        BLOCK = 64
         q, k, v, o, l, m, q_idx, k_idx = ctx.saved_tensors
 
         do = do.contiguous()
