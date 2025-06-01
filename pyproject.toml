@@ -1,0 +1,4 @@
+[tool.poetry]
+name = "scfa"
+version = "0.1.0"
+description = "Sparse Causal Flash Attention"
