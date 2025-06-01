@@ -8,3 +8,4 @@
 *.pdf
 .clangd
 *.egg-info
+*.pyc
