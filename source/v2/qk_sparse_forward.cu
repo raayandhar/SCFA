@@ -19,7 +19,7 @@
 #include <cub/cub.cuh>
 #include <cmath>
 #include <cstdint>
-#include <limits>
+#include <cuda_runtime.h>
 
 #define DIVUP(x, y) (((x) + (y) - 1) / (y))
 

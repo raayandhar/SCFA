@@ -5,3 +5,7 @@
 *.cubin
 *.fatbin
 .vscode/
+*.pdf
+.clangd
+*.egg-info
+*.pyc
