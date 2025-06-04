@@ -2,3 +2,11 @@
 name = "scfa"
 version = "0.1.0"
 description = "Sparse Causal Flash Attention"
+
+[tool.poetry.dependencies]
+torch = ">=2.5.1"
+transformers = ">=4.49.2"
+ipython = ">=8.18.1"
+ipykernel = ">=6.29.4"
+jupyter = ">=1.1.1"
+accelerate = ">=2.2.0"

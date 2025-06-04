@@ -9,3 +9,4 @@
 .clangd
 *.egg-info
 *.pyc
+.venv/
