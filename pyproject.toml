@@ -1,4 +1,18 @@
 [tool.poetry]
-name = "scfa"
+name = "source"
 version = "0.1.0"
 description = "Sparse Causal Flash Attention"
+
+[tool.poetry.dependencies]
+torch = "*"
+transformers = "*"
+ipython = "*"
+ipykernel = "*"
+jupyter = "*"
+accelerate = "*"
+seaborn = "*"
+datasets = "*"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

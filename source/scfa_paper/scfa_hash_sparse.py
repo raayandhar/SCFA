@@ -25,6 +25,10 @@ def _fwd_kernel_hash(
     BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, # will load BLOCK_M queries, and compute self attention by blocks of BLOCK_N keys
     BLOCK_DMODEL: tl.constexpr # dimensionality of heads: D
 ):
+    
+    """
+    Triton kernel launch grid: (query block idx, head_batch idx)
+    """
     start_m = tl.program_id(0) # idx of sequence length chunk of size 128 (BLOCK_N)
     off_hz = tl.program_id(1) # idx of head_batch (unique idx for each head in each batch)
 
@@ -56,13 +60,13 @@ def _fwd_kernel_hash(
 
     # Increment the start and end to find start and end blocks 
     for _ in range(0, N_CTX_KV, BLOCK_N):
-        kh_vals = tl.load(K_hash + offs_kh, mask=offs_n < N_CTX_KV, other=+1e9)
+        kh_vals = tl.load(K_hash + offs_kh, mask=offs_n < N_CTX_KV, other=float("inf"))
         min_kh = tl.min(kh_vals, axis=0)
-        if min_kh <= max_q_hash and min_kh != 1e9:
+        if min_kh <= max_q_hash and min_kh != float("inf"):
             end_n += 1
-        kh_vals = tl.where(offs_n < N_CTX_KV, kh_vals, -1e9)
+        kh_vals = tl.where(offs_n < N_CTX_KV, kh_vals, -float("inf"))
         max_kh = tl.max(kh_vals, axis=0)
-        if max_kh < min_q_hash and max_kh != -1e9:
+        if max_kh < min_q_hash and max_kh != -float("inf"):
             start_n += 1
         offs_n += BLOCK_N
         offs_kh += BLOCK_N * skhn
@@ -73,9 +77,9 @@ def _fwd_kernel_hash(
     offs_ki = off_hz * skih + offs_n * skin
     max_qi = tl.max(qi_vals, axis=0) # largest query index in block
     for i in range(start_n, end_n):
-        ki_vals = tl.load(K_idx + offs_ki, mask=offs_n < N_CTX_KV, other=1e9)
+        ki_vals = tl.load(K_idx + offs_ki, mask=offs_n < N_CTX_KV, other=float("inf"))
         min_ki = tl.min(ki_vals, axis=0)
-        if min_ki <= max_qi and min_ki != 1e9:
+        if min_ki <= max_qi and min_ki != float("inf"):
             causal_end_n = i + 1
         offs_ki += BLOCK_N * skin
         offs_n += BLOCK_N
@@ -297,7 +301,7 @@ def _bwd_kernel_hash(
             # compute dk = dot(ds.T, q)
             dk += tl.dot(tl.trans(ds.to(Q.dtype.element_ty)), q)
 
-            dq = tl.load(dq_ptrs)
+            dq = tl.load(dq_ptrs, mask=offs_m[:, None] < N_CTX_Q)
             # compute dq
             dq += tl.dot(ds.to(Q.dtype.element_ty), k)
             tl.store(dq_ptrs, dq, mask=offs_m[:, None] < N_CTX_Q)
