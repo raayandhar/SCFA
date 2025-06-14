@@ -183,9 +183,10 @@ def monkeypatch(model, num_buckets: int, learnable_hash: bool = False, one_at_a_
             # Construct new module
             if learnable_hash:
                 new_attn_module = LearnableHashAttention(config = module.config, layer_idx = module.layer_idx, num_buckets = num_buckets, device = model.device)
+                new_attn_module.load_state_dict(module.state_dict(), strict = False)
             else:
                 new_attn_module = HashAttention(config = module.config, layer_idx = module.layer_idx, num_buckets = num_buckets, device = model.device)
-            new_attn_module.load_state_dict(module.state_dict(), strict = False)
+                new_attn_module.load_state_dict(module.state_dict())
             new_attn_module.to(model.device).to(torch.bfloat16)
 
             # Split full name to find parent module
@@ -223,7 +224,7 @@ def train_model(model, tokenizer, num_buckets: int, learnable_hash: bool = False
         for p in hash_model.parameters():
             p.requires_grad = False
         for name, module in hash_model.named_modules():
-            if isinstance(module, HashAttention):
+            if isinstance(module, (HashAttention, LearnableHashAttention)):
                 for param in module.parameters():
                     param.requires_grad = True
 
@@ -414,12 +415,12 @@ if __name__ == "__main__":
     model = AutoModelForCausalLM.from_pretrained(args.model_name,
                                                 torch_dtype=torch.bfloat16,
                                                 device_map=args.device)
-    buckets_sweep = [4, 8, 16, 32, 64]
+    buckets_sweep = [8]
     for num_buckets in buckets_sweep:
         train_model(model, 
                     tokenizer, 
                     num_buckets=num_buckets, 
-                    num_steps_per_module=1e3, 
-                    num_all_param_tune_steps=1e4, 
-                    max_length=512, 
+                    num_steps_per_module=5e3, 
+                    num_all_param_tune_steps=5e4, 
+                    max_length=1024, 
                     learnable_hash=args.learnable_hash)

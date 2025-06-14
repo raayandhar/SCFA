@@ -11,6 +11,6 @@
 *.pyc
 experiments/lm-evaluation-harness/
 experiments/checkpoints/
-experiments/eval_results/
+eval_results/
 wandb/
 checkpoints/
