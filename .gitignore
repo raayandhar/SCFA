@@ -9,3 +9,8 @@
 .clangd
 *.egg-info
 *.pyc
+experiments/lm-evaluation-harness/
+experiments/checkpoints/
+eval_results/
+wandb/
+checkpoints/
